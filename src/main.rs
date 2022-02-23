@@ -3,12 +3,14 @@
 //
 // This should never be run without a firewall blocking all remote 
 // requests to port 1234!
-use actix_web::{web, get, App, HttpRequest, HttpServer, Responder, HttpResponse};
+use actix_web::{web, get, post, App, HttpRequest, HttpServer, Responder, HttpResponse};
 use serde::{Deserialize, Serialize};
 use log::debug;
 mod database;
 use std;
 use env_logger;
+use serenity::model::prelude::*;
+use serde_json::json;
 
 #[derive(Serialize, Deserialize)]
 struct User {
@@ -42,6 +44,31 @@ async fn getch(req: HttpRequest, id: web::Path<u64>) -> HttpResponse {
     HttpResponse::NotFound().finish()
 }
 
+#[derive(Serialize, Deserialize)]
+struct Message {
+    pub channel_id: u64,
+    pub content: String,
+    pub embed: serenity::model::channel::Embed,
+    pub mention_roles: Vec<String>,
+}
+
+#[post("/messages")]
+async fn send_message(req: HttpRequest, msg: web::Json<Message>) -> HttpResponse {
+    let data: &IpcAppData = req.app_data::<web::Data<IpcAppData>>().unwrap();
+
+    let res = data.database.clis.main.http.send_message(msg.channel_id, &json!({
+        "content": msg.content,
+        "embeds": vec![msg.embed.clone()],
+        "mention_roles": msg.mention_roles,
+    })).await;
+
+    if res.is_err() {
+        return HttpResponse::BadRequest().finish();
+    }
+
+    HttpResponse::Ok().finish()
+}
+
 struct IpcAppData {
     database: database::Database,
 }
@@ -62,6 +89,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(app_data.clone())
             .wrap(actix_web::middleware::Logger::default())
             .service(getch)
+            .service(send_message)
     })
     .bind(("127.0.0.1", 1234))
     .unwrap()
