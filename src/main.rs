@@ -5,7 +5,7 @@
 // requests to port 1234!
 use actix_web::{web, get, post, App, HttpRequest, HttpServer, Responder, HttpResponse};
 use serde::{Deserialize, Serialize};
-use log::debug;
+use log::{debug, error};
 mod database;
 use std;
 use env_logger;
@@ -63,6 +63,7 @@ async fn send_message(req: HttpRequest, msg: web::Json<Message>) -> HttpResponse
     })).await;
 
     if res.is_err() {
+        error!("Error sending message: {:?}", res.err());
         return HttpResponse::BadRequest().finish();
     }
 
