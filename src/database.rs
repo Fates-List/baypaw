@@ -5,17 +5,20 @@ use serde::{Serialize, Deserialize};
 use serenity::{
     prelude::*,
 };
-use serenity::client::bridge::gateway::GatewayIntents;
+use serenity::model::gateway::GatewayIntents;
 use serenity::model::user::User;
 use std::sync::Arc;
 use log::{debug, error};
 use std::fs::File;
 use std::io::Read;
-use serenity::framework::standard::{
-    StandardFramework
-};
 use tokio::task;
 use serenity::model::prelude::UserId;
+use serenity::model::prelude::ChannelId;
+use serenity::model::prelude::Ready;
+use serenity::async_trait;
+use serde_json::json;
+use serenity::builder::CreateInvite;
+use serenity::json as sjson;
 
 pub struct Clients {
     pub main: Arc<serenity::CacheAndHttp>,
@@ -37,6 +40,15 @@ struct BaypawTokens {
     token_fetch_bot_1: String,
 }
 
+struct MainHandler;
+
+#[async_trait]
+impl EventHandler for MainHandler {
+    async fn ready(&self, _ctx: Context, ready: Ready) {
+        debug!("{} is connected!", ready.user.name);
+    }
+}
+
 impl Database {
     pub async fn new() -> Self {
         let cfg = Config::from_url("redis://localhost:1001/1");
@@ -55,15 +67,9 @@ impl Database {
 
         // Login main, server and squirrelflight using serenity
         
-        let framework = StandardFramework::new()
-        .configure(|c| c.prefix("%")); // set the bot's prefix to "~"
-
-        let server_framework = StandardFramework::new()
-        .configure(|c| c.prefix("+")); // set the bot's prefix to "~"
-
         // Main client
         let mut main_cli = Client::builder(&tokens.token_main.clone())
-        .framework(framework)
+        .event_handler(MainHandler)
         .intents(GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES | GatewayIntents::GUILD_MEMBERS | GatewayIntents::GUILD_PRESENCES)
         .await
         .unwrap();  
@@ -74,8 +80,7 @@ impl Database {
 
         // Server client
         let mut server_cli = Client::builder(&tokens.token_server.clone())
-        .framework(server_framework)
-        .intents(GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES | GatewayIntents::GUILD_MEMBERS | GatewayIntents::GUILD_PRESENCES)
+        .intents(GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES | GatewayIntents::GUILD_MEMBERS)
         .await
         .unwrap();
 
@@ -84,7 +89,12 @@ impl Database {
 
         let server_cache = server_cli.cache_and_http.clone();
 
-        task::spawn(async move {server_cli.start().await });
+        task::spawn(async move {
+            let res = server_cli.start().await; 
+            if res.is_err() {
+                error!("{}", res.err().unwrap());
+            }
+        });
 
         Database {
             redis: cfg.create_pool(Some(Runtime::Tokio1)).unwrap(),
@@ -101,7 +111,7 @@ impl Database {
         // First check the main_cli
         debug!(
             "Have {count} cached users in main cli",
-            count = self.clis.main.cache.user_count().await,
+            count = self.clis.main.cache.user_count(),
         );
 
         let cached_data = UserId(id).to_user_cached(&self.clis.main.cache).await;
@@ -113,7 +123,7 @@ impl Database {
         // Then check the server_cli
         debug!(
             "Have {count} cached users in server cli",
-            count = self.clis.servers.cache.user_count().await,
+            count = self.clis.servers.cache.user_count(),
         );
 
         let cached_data = UserId(id).to_user_cached(&self.clis.servers.cache).await;
@@ -130,5 +140,26 @@ impl Database {
             return None;
         }
         return Some(fetched.unwrap());
+    }
+
+    pub async fn guild_invite(&self, cid: u64, uid: u64) -> Option<String> {
+        let b = CreateInvite::default()
+            .max_age(60*15)
+            .max_uses(1)
+            .temporary(false)
+            .unique(true)
+            .clone();
+        
+        let map = sjson::hashmap_to_json_map(b.0);
+
+        let chan = self.clis.servers.http.create_invite(cid, 
+            &map, 
+            Some(
+                &format!("Invite created for user {user}",
+                user = uid,
+            ))).await;
+        
+        chan.ok().map(|c| c.url())
+
     }
 }

@@ -10,7 +10,9 @@ mod database;
 use std;
 use env_logger;
 use serenity::model::prelude::*;
+use serenity::model::id::GuildId;
 use serde_json::json;
+use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize)]
 struct User {
@@ -70,6 +72,74 @@ async fn send_message(req: HttpRequest, msg: web::Json<Message>) -> HttpResponse
     HttpResponse::Ok().finish()
 }
 
+/// Important: This API does not handle server privacy. This should be 
+/// done server-side
+
+#[derive(Serialize, Deserialize)]
+struct GuildInviteQuery {
+    cid: u64, // Channel ID
+    uid: u64, // User ID
+    gid: u64, // Guild ID
+}
+
+#[derive(Serialize, Deserialize)]
+struct GuildInviteData {
+    url: String,
+    cid: u64, // First successful cid
+}
+
+#[get("/guild-invite")]
+async fn guild_invite(req: HttpRequest, info: web::Query<GuildInviteQuery>) -> HttpResponse {
+    let data: &IpcAppData = req.app_data::<web::Data<IpcAppData>>().unwrap();
+
+    if info.cid.clone() != 0 {
+        let invite_code = data.database.guild_invite(info.cid, info.uid).await;
+
+        if let Some(url) = invite_code {
+            return HttpResponse::Ok().json(GuildInviteData {
+                url: url,
+                cid: info.cid.clone(),
+            });
+        }
+    } else {
+        // First get channels from cache
+        let chan_cache = GuildId(info.gid).to_guild_cached(data.database.clis.servers.cache.clone());
+
+        if let Some(guild) = chan_cache {
+            let channels = guild.channels;
+            for channel in channels.keys() {
+                let invite_code = data.database.guild_invite(channel.0, info.uid).await;
+
+                if let Some(url) = invite_code {
+                    return HttpResponse::Ok().json(GuildInviteData {
+                        url: url,
+                        cid: u64::from(channel.0),
+                    });
+                }
+            }
+        } else {
+            let res = GuildId(info.gid).channels(data.database.clis.servers.http.clone()).await;
+            if let Err(err) = res {
+                error!("Error getting channels: {:?}", err);
+                return HttpResponse::BadRequest().finish();
+            }
+            let channels = res.unwrap();
+            for channel in channels.keys() {
+                let invite_code = data.database.guild_invite(channel.0, info.uid).await;
+
+                if let Some(url) = invite_code {
+                    return HttpResponse::Ok().json(GuildInviteData {
+                        url: url,
+                        cid: u64::from(channel.0),
+                    });
+                }
+            }
+        }
+    }
+    HttpResponse::NotFound().finish()
+}
+
+
 struct IpcAppData {
     database: database::Database,
 }
@@ -91,6 +161,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(actix_web::middleware::Logger::default())
             .service(getch)
             .service(send_message)
+            .service(guild_invite)
     })
     .bind(("127.0.0.1", 1234))
     .unwrap()
