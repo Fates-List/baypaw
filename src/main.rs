@@ -1,3 +1,5 @@
+#![feature(derive_default_enum)]
+
 // A *very* primitive and possibly insecure IPC implementation 
 // that will also hold the admin bot (in serenity) soon
 //
@@ -14,12 +16,23 @@ use serenity::model::id::GuildId;
 use serde_json::json;
 use std::collections::HashMap;
 
+#[derive(Deserialize, Serialize, Clone, PartialEq, Default)]
+pub enum Status {
+    #[default]
+    Unknown = 0,
+    Online = 1,
+    Offline = 2, // Or invisible
+    Idle = 3,
+    DoNotDisturb = 4,
+}
+
 #[derive(Serialize, Deserialize)]
 struct User {
     username: String,
     disc: String,
     id: String,
     avatar: String,
+    status: Status,
     bot: bool,
 }
 
@@ -40,6 +53,7 @@ async fn getch(req: HttpRequest, id: web::Path<u64>) -> HttpResponse {
             disc: user.discriminator.to_string(),
             id: user.id.to_string(),
             avatar: avatar,
+            status: Status::Unknown,
             bot: user.bot,
         });
     }
