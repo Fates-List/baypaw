@@ -35,7 +35,6 @@ pub struct Database {
 #[derive(Serialize, Deserialize, Clone)]
 struct BaypawTokens {
     token_main: String,
-    token_server: String,
     token_squirrelflight: String,
     token_fetch_bot_1: String,
 }
@@ -79,8 +78,8 @@ impl Database {
         task::spawn(async move {main_cli.start().await });
 
         // Server client
-        let mut server_cli = Client::builder(&tokens.token_server.clone())
-        .intents(GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES | GatewayIntents::GUILD_MEMBERS)
+        let mut server_cli = Client::builder(&tokens.token_squirrelflight.clone())
+        .intents(GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES)
         .await
         .unwrap();
 
