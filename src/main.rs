@@ -5,36 +5,15 @@
 //
 // This should never be run without a firewall blocking all remote 
 // requests to port 1234!
-use actix_web::{web, get, post, App, HttpRequest, HttpServer, Responder, HttpResponse};
+use actix_web::{web, get, post, App, HttpRequest, HttpServer, HttpResponse};
 use serde::{Deserialize, Serialize};
 use log::{debug, error};
 mod database;
 use std;
 use env_logger;
-use serenity::model::prelude::*;
 use serenity::model::id::GuildId;
 use serde_json::json;
-use std::collections::HashMap;
-
-#[derive(Deserialize, Serialize, Clone, PartialEq, Default)]
-pub enum Status {
-    #[default]
-    Unknown = 0,
-    Online = 1,
-    Offline = 2, // Or invisible
-    Idle = 3,
-    DoNotDisturb = 4,
-}
-
-#[derive(Serialize, Deserialize)]
-struct User {
-    username: String,
-    disc: String,
-    id: String,
-    avatar: String,
-    status: Status,
-    bot: bool,
-}
+use bristlefrost::models::{User, Status};
 
 #[get("/getch/{id}")]
 async fn getch(req: HttpRequest, id: web::Path<u64>) -> HttpResponse {
@@ -115,41 +94,42 @@ async fn guild_invite(req: HttpRequest, info: web::Query<GuildInviteQuery>) -> H
                 cid: info.cid.clone(),
             });
         }
+    }
+    
+    // First get channels from cache
+    let chan_cache = GuildId(info.gid).to_guild_cached(data.database.clis.servers.cache.clone());
+
+    if let Some(guild) = chan_cache {
+        let channels = guild.channels;
+        for channel in channels.keys() {
+            let invite_code = data.database.guild_invite(channel.0, info.uid).await;
+
+            if let Some(url) = invite_code {
+                return HttpResponse::Ok().json(GuildInviteData {
+                    url: url,
+                    cid: u64::from(channel.0),
+                });
+            }
+        }
     } else {
-        // First get channels from cache
-        let chan_cache = GuildId(info.gid).to_guild_cached(data.database.clis.servers.cache.clone());
+        let res = GuildId(info.gid).channels(data.database.clis.servers.http.clone()).await;
+        if let Err(err) = res {
+            error!("Error getting channels: {:?}", err);
+            return HttpResponse::BadRequest().finish();
+        }
+        let channels = res.unwrap();
+        for channel in channels.keys() {
+            let invite_code = data.database.guild_invite(channel.0, info.uid).await;
 
-        if let Some(guild) = chan_cache {
-            let channels = guild.channels;
-            for channel in channels.keys() {
-                let invite_code = data.database.guild_invite(channel.0, info.uid).await;
-
-                if let Some(url) = invite_code {
-                    return HttpResponse::Ok().json(GuildInviteData {
-                        url: url,
-                        cid: u64::from(channel.0),
-                    });
-                }
-            }
-        } else {
-            let res = GuildId(info.gid).channels(data.database.clis.servers.http.clone()).await;
-            if let Err(err) = res {
-                error!("Error getting channels: {:?}", err);
-                return HttpResponse::BadRequest().finish();
-            }
-            let channels = res.unwrap();
-            for channel in channels.keys() {
-                let invite_code = data.database.guild_invite(channel.0, info.uid).await;
-
-                if let Some(url) = invite_code {
-                    return HttpResponse::Ok().json(GuildInviteData {
-                        url: url,
-                        cid: u64::from(channel.0),
-                    });
-                }
+            if let Some(url) = invite_code {
+                return HttpResponse::Ok().json(GuildInviteData {
+                    url: url,
+                    cid: u64::from(channel.0),
+                });
             }
         }
     }
+    debug!("Failed to fetch guild");
     HttpResponse::NotFound().finish()
 }
 

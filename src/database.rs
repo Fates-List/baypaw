@@ -13,10 +13,8 @@ use std::fs::File;
 use std::io::Read;
 use tokio::task;
 use serenity::model::prelude::UserId;
-use serenity::model::prelude::ChannelId;
 use serenity::model::prelude::Ready;
 use serenity::async_trait;
-use serde_json::json;
 use serenity::builder::CreateInvite;
 use serenity::json as sjson;
 
@@ -29,7 +27,6 @@ pub struct Clients {
 pub struct Database {
     pub redis: deadpool_redis::Pool,
     pub clis: Clients,
-    tokens: BaypawTokens,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -97,7 +94,6 @@ impl Database {
 
         Database {
             redis: cfg.create_pool(Some(Runtime::Tokio1)).unwrap(),
-            tokens,
             clis: Clients {
                 main: main_cache,
                 servers: server_cache,
