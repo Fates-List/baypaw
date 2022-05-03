@@ -12,11 +12,11 @@ use log::{debug, error};
 use std::fs::File;
 use std::io::Read;
 use tokio::task;
-use serenity::model::prelude::UserId;
-use serenity::model::prelude::Ready;
+use serenity::model::prelude::{UserId, Ready, GuildId};
 use serenity::async_trait;
 use serenity::builder::CreateInvite;
 use serenity::json as sjson;
+use std::collections::HashMap;
 
 pub struct Clients {
     pub main: Arc<serenity::CacheAndHttp>,
@@ -24,16 +24,38 @@ pub struct Clients {
     pub fetcher: serenity::http::Http,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct StaffRole {
+    pub id: String,
+    pub staff_id: String,
+    pub perm: f32,
+    pub fname: String
+}
+
 pub struct Database {
     pub redis: deadpool_redis::Pool,
     pub clis: Clients,
+    pub staff_roles: HashMap<String, StaffRole>,
+    pub discord: Discord,
+    // staffRoleCache maps the ID to its key
+    pub staff_roles_cache: HashMap<u64, String>
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
 struct BaypawTokens {
     token_main: String,
     token_squirrelflight: String,
     token_fetch_bot_1: String,
+}
+
+#[derive(Deserialize)]
+pub struct Discord {
+    pub servers: Servers
+}
+
+#[derive(Deserialize, Clone)]
+pub struct Servers {
+    pub main: GuildId
 }
 
 struct MainHandler;
@@ -55,11 +77,32 @@ impl Database {
 
         let data_dir = path.into_os_string().into_string().unwrap() + "/FatesList/config/data/";        
         debug!("Got data dir: {}", data_dir);
+        
         let mut file = File::open(data_dir.to_owned() + "secrets.json").expect("No config file found");
         let mut discord = String::new();
         file.read_to_string(&mut discord).unwrap();
 
         let tokens: BaypawTokens = serde_json::from_str(&discord).expect("secrets.json was not well-formatted");
+
+        let mut staff_file = File::open(data_dir.to_owned() + "staff_roles.json").expect("No staff roles file found");
+        let mut staff_str = String::new();
+        staff_file.read_to_string(&mut staff_str).unwrap();
+
+        let staff_roles: HashMap<String, StaffRole> = serde_json::from_str(&staff_str).expect("staff_roles.json was not well-formatted");
+
+        let mut staff_roles_cache = HashMap::new();
+
+        // TODO: why is this even needed?
+        for (key, role) in &staff_roles {
+            // This sort of copying is rather cheap
+            staff_roles_cache.insert(role.id.parse::<u64>().unwrap().clone(), key.clone());
+        }
+
+        let mut discord_file = File::open(data_dir.to_owned() + "discord.json").expect("No discord.json file found");
+        let mut discord_str = String::new();
+        discord_file.read_to_string(&mut discord_str).unwrap();
+
+        let discord: Discord = serde_json::from_str(&discord_str).expect("discord.json was not well-formatted");
 
         // Login main, server and squirrelflight using serenity
         
@@ -99,7 +142,32 @@ impl Database {
                 servers: server_cache,
                 fetcher: fetch_bot_1_cli
             },
+            staff_roles,
+            staff_roles_cache,
+            discord
         }
+    }
+
+    pub async fn get_user_perms(&self, id: u64) -> &StaffRole {
+        let mut perms = self.staff_roles.get("user").unwrap();
+
+        if let Some(member) = self.clis.main.cache.member(self.discord.servers.main, UserId(id)) {
+            /* 
+             * Iterate over every role the member has and check if its in staff_role_cache or not
+             * This is also more optimized than looping over all of staff_roles as we only loop
+             * over all roles once
+            */
+            for role in member.roles {
+                if let Some(possible_perm) = self.staff_roles_cache.get(&role.0) {
+                    let possible = self.staff_roles.get(possible_perm).unwrap();
+                    if possible.perm > perms.perm {
+                        perms = possible;
+                    }
+                } 
+            }
+        }  
+
+        perms
     }
 
     pub async fn getch(&self, id: u64) -> Option<User> {

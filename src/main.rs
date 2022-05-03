@@ -15,6 +15,13 @@ use serenity::model::id::GuildId;
 use serde_json::json;
 use bristlefrost::models::{User, Status};
 
+#[get("/perms/{id}")]
+async fn user_perms(req: HttpRequest, id: web::Path<u64>) -> HttpResponse {
+    let data: &IpcAppData = req.app_data::<web::Data<IpcAppData>>().unwrap();
+
+    HttpResponse::Ok().json(data.database.get_user_perms(id.into_inner()).await)
+}
+
 #[get("/getch/{id}")]
 async fn getch(req: HttpRequest, id: web::Path<u64>) -> HttpResponse {
     let data: &IpcAppData = req.app_data::<web::Data<IpcAppData>>().unwrap();
@@ -153,6 +160,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(app_data.clone())
             .wrap(actix_web::middleware::Logger::default())
+            .service(user_perms)
             .service(getch)
             .service(send_message)
             .service(guild_invite)
