@@ -99,7 +99,7 @@ impl Database {
 
         let mut staff_roles_cache = HashMap::new();
 
-        // TODO: why is this even needed?
+        // This is needed to create a bi-directional cache allowing the mapping of role ids to keys as well as keys to role ids
         for (key, role) in &staff_roles {
             // This sort of copying is rather cheap
             staff_roles_cache.insert(role.id.parse::<u64>().unwrap(), key.clone());
