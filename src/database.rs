@@ -6,7 +6,7 @@ use serenity::{
     prelude::*,
 };
 use serenity::model::gateway::GatewayIntents;
-use serenity::model::user::User;
+use serenity::model::user::{User, OnlineStatus};
 use std::sync::Arc;
 use log::{debug, error};
 use std::fs::File;
@@ -17,6 +17,7 @@ use serenity::async_trait;
 use serenity::builder::CreateInvite;
 use serenity::json as sjson;
 use std::collections::HashMap;
+use bristlefrost::models::Status;
 
 pub struct Clients {
     pub main: Arc<serenity::CacheAndHttp>,
@@ -58,6 +59,12 @@ pub struct Servers {
     pub main: GuildId
 }
 
+// A ISuer is a internal user struct
+pub struct IUser {
+    pub user: User,
+    pub status: Status,
+}
+
 struct MainHandler;
 
 #[async_trait]
@@ -95,7 +102,7 @@ impl Database {
         // TODO: why is this even needed?
         for (key, role) in &staff_roles {
             // This sort of copying is rather cheap
-            staff_roles_cache.insert(role.id.parse::<u64>().unwrap().clone(), key.clone());
+            staff_roles_cache.insert(role.id.parse::<u64>().unwrap(), key.clone());
         }
 
         let mut discord_file = File::open(data_dir.to_owned() + "discord.json").expect("No discord.json file found");
@@ -170,17 +177,45 @@ impl Database {
         perms
     }
 
-    pub async fn getch(&self, id: u64) -> Option<User> {
+    pub async fn getch(&self, id: u64) -> Option<IUser> {
         // First check the main_cli
         debug!(
             "Have {count} cached users in main cli",
             count = self.clis.main.cache.user_count(),
         );
 
-        let cached_data = UserId(id).to_user_cached(&self.clis.main.cache).await;
+        let user_id = UserId(id);
+
+        let cached_data = user_id.to_user_cached(&self.clis.main.cache).await;
 
         if cached_data.is_some() {
-            return Some(cached_data.unwrap());
+            let cached_data = cached_data.unwrap();
+
+            for id in self.clis.main.cache.guilds() {
+                let p_opt = self.clis.main.cache.guild_field(id, |guild| guild.presences.clone());
+                if let Some(p) = p_opt {
+                    let status = p.get(&user_id);
+
+                    if let Some(status) = status {
+                        return Some(IUser {
+                            user: cached_data,
+                            status: match status.status {
+                                OnlineStatus::Online => Status::Online,
+                                OnlineStatus::Idle => Status::Idle,
+                                OnlineStatus::DoNotDisturb => Status::DoNotDisturb,
+                                OnlineStatus::Invisible => Status::Offline,
+                                OnlineStatus::Offline => Status::Offline,
+                                _ => Status::Unknown,
+                            }
+                        });
+                    }
+                }
+            }
+
+            return Some(IUser {
+                user: cached_data,
+                status: Status::Unknown,
+            });
         }
 
         // Then check the server_cli
@@ -189,10 +224,14 @@ impl Database {
             count = self.clis.servers.cache.user_count(),
         );
 
-        let cached_data = UserId(id).to_user_cached(&self.clis.servers.cache).await;
+        let cached_data = user_id.to_user_cached(&self.clis.servers.cache).await;
 
+        // No presence intent so....
         if cached_data.is_some() {
-            return Some(cached_data.unwrap());
+            return Some(IUser {
+                user: cached_data.unwrap(),
+                status: Status::Unknown,
+            });
         }
 
         // All failed, lets move to fetch_bot_1
@@ -202,7 +241,10 @@ impl Database {
             error!("{:?}", fetched.unwrap_err());
             return None;
         }
-        return Some(fetched.unwrap());
+        Some(IUser {
+            user: fetched.unwrap(),
+            status: Status::Unknown,
+        })
     }
 
     pub async fn guild_invite(&self, cid: u64, uid: u64) -> Option<String> {

@@ -9,11 +9,9 @@ use actix_web::{web, get, post, App, HttpRequest, HttpServer, HttpResponse};
 use serde::{Deserialize, Serialize};
 use log::{debug, error};
 mod database;
-use std;
-use env_logger;
 use serenity::model::id::GuildId;
 use serde_json::json;
-use bristlefrost::models::{User, Status};
+use bristlefrost::models::User;
 
 #[get("/perms/{id}")]
 async fn user_perms(req: HttpRequest, id: web::Path<u64>) -> HttpResponse {
@@ -30,17 +28,17 @@ async fn getch(req: HttpRequest, id: web::Path<u64>) -> HttpResponse {
 
     if user.is_some() {
         let user = user.unwrap();
-        debug!("Found user {}", user);
+        debug!("Found user {}", user.user);
 
-        let avatar = user.avatar_url().unwrap_or_else(|| "".to_string());
+        let avatar = user.user.avatar_url().unwrap_or_else(|| "".to_string());
 
         return HttpResponse::Ok().json(User {
-            username: user.name,
-            disc: user.discriminator.to_string(),
-            id: user.id.to_string(),
-            avatar: avatar,
-            status: Status::Unknown,
-            bot: user.bot,
+            username: user.user.name,
+            disc: user.user.discriminator.to_string(),
+            id: user.user.id.to_string(),
+            avatar,
+            status: user.status,
+            bot: user.user.bot,
         });
     }
     HttpResponse::NotFound().finish()
@@ -92,13 +90,13 @@ struct GuildInviteData {
 async fn guild_invite(req: HttpRequest, info: web::Query<GuildInviteQuery>) -> HttpResponse {
     let data: &IpcAppData = req.app_data::<web::Data<IpcAppData>>().unwrap();
 
-    if info.cid.clone() != 0 {
+    if info.cid != 0 {
         let invite_code = data.database.guild_invite(info.cid, info.uid).await;
 
         if let Some(url) = invite_code {
             return HttpResponse::Ok().json(GuildInviteData {
-                url: url,
-                cid: info.cid.clone(),
+                url,
+                cid: info.cid,
             });
         }
     }
@@ -113,8 +111,8 @@ async fn guild_invite(req: HttpRequest, info: web::Query<GuildInviteQuery>) -> H
 
             if let Some(url) = invite_code {
                 return HttpResponse::Ok().json(GuildInviteData {
-                    url: url,
-                    cid: u64::from(channel.0),
+                    url,
+                    cid: channel.0,
                 });
             }
         }
@@ -130,8 +128,8 @@ async fn guild_invite(req: HttpRequest, info: web::Query<GuildInviteQuery>) -> H
 
             if let Some(url) = invite_code {
                 return HttpResponse::Ok().json(GuildInviteData {
-                    url: url,
-                    cid: u64::from(channel.0),
+                    url,
+                    cid: channel.0,
                 });
             }
         }
