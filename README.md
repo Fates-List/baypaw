@@ -4,6 +4,6 @@ Baypaw is a replacement to our old *shitty* IPC implementation
 
 It can be used by other things on Fates List for more efficient data retrieval
 
-The code is highly primitive and should not be run without a firewall on port 1234
+The code is highly insecure to remote attacks and should not be run without a firewall on port 1234
 
-This may one day support our manager bot as well
+*Like all of our rust code, this requires nightly rust in order to compile**

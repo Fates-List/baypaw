@@ -114,9 +114,8 @@ impl Database {
         // Login main, server and squirrelflight using serenity
         
         // Main client
-        let mut main_cli = Client::builder(&tokens.token_main.clone())
+        let mut main_cli = Client::builder(&tokens.token_main.clone(), GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES | GatewayIntents::GUILD_MEMBERS | GatewayIntents::GUILD_PRESENCES)
         .event_handler(MainHandler)
-        .intents(GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES | GatewayIntents::GUILD_MEMBERS | GatewayIntents::GUILD_PRESENCES)
         .await
         .unwrap();  
         
@@ -125,13 +124,12 @@ impl Database {
         task::spawn(async move {main_cli.start().await });
 
         // Server client
-        let mut server_cli = Client::builder(&tokens.token_squirrelflight.clone())
-        .intents(GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES)
+        let mut server_cli = Client::builder(&tokens.token_squirrelflight.clone(), GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES)
         .await
         .unwrap();
 
         // Fetch bot 1
-        let fetch_bot_1_cli = serenity::http::Http::new_with_token(&tokens.token_fetch_bot_1.clone());
+        let fetch_bot_1_cli = serenity::http::Http::new(&tokens.token_fetch_bot_1.clone());
 
         let server_cache = server_cli.cache_and_http.clone();
 

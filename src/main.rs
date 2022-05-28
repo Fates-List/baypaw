@@ -1,5 +1,3 @@
-#![feature(derive_default_enum)]
-
 // A *very* primitive and possibly insecure IPC implementation 
 // that will also hold the admin bot (in serenity) soon
 //
