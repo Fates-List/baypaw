@@ -8,7 +8,7 @@ use serenity::{
 use serenity::model::gateway::GatewayIntents;
 use serenity::model::user::{User, OnlineStatus};
 use std::sync::Arc;
-use log::{debug, error};
+use log::{debug, error, info};
 use std::fs::File;
 use std::io::Read;
 use tokio::task;
@@ -18,6 +18,7 @@ use serenity::builder::CreateInvite;
 use serenity::json as sjson;
 use std::collections::HashMap;
 use bristlefrost::models::Status;
+use sqlx::postgres::PgPoolOptions;
 
 pub struct Clients {
     pub main: Arc<serenity::CacheAndHttp>,
@@ -33,13 +34,24 @@ pub struct StaffRole {
     pub fname: String
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct NormalRole {
+    pub id: String,
+    pub flag: f32,
+    pub fname: String
+}
+
 pub struct Database {
     pub redis: deadpool_redis::Pool,
+    pub pool: sqlx::PgPool,
     pub clis: Clients,
     pub staff_roles: HashMap<String, StaffRole>,
+    pub normal_roles: HashMap<String, NormalRole>,
     pub discord: Discord,
     // staffRoleCache maps the ID to its key
-    pub staff_roles_cache: HashMap<u64, String>
+    pub staff_roles_cache: HashMap<u64, String>,
+    // normalRoleCache maps the ID to its key
+    pub normal_roles_cache: HashMap<u64, String>
 }
 
 #[derive(Deserialize, Clone)]
@@ -76,6 +88,16 @@ impl EventHandler for MainHandler {
 
 impl Database {
     pub async fn new() -> Self {
+        const MAX_CONNECTIONS: u32 = 3; // max connections to the database, we don't need too many here
+        
+        let pool = PgPoolOptions::new()
+            .max_connections(MAX_CONNECTIONS)
+            .connect(&std::env::var("DATABASE_URL").expect("missing DATABASE_URL"))
+            .await
+            .expect("Could not initialize connection");
+
+        info!("Connected to database");
+
         let cfg = Config::from_url("redis://localhost:1001/1");
         let path = match env::var_os("HOME") {
             None => { panic!("$HOME not set"); }
@@ -96,13 +118,27 @@ impl Database {
         staff_file.read_to_string(&mut staff_str).unwrap();
 
         let staff_roles: HashMap<String, StaffRole> = serde_json::from_str(&staff_str).expect("staff_roles.json was not well-formatted");
+        
+        let mut normal_roles_file = File::open(data_dir.to_owned() + "roles.json").expect("No normal roles file found");
+        let mut normal_str = String::new();
+        normal_roles_file.read_to_string(&mut normal_str).unwrap();
+
+        let normal_roles: HashMap<String, NormalRole> = serde_json::from_str(&normal_str).expect("roles.json was not well-formatted");
 
         let mut staff_roles_cache = HashMap::new();
+        
+        let mut normal_roles_cache = HashMap::new();
 
         // This is needed to create a bi-directional cache allowing the mapping of role ids to keys as well as keys to role ids
         for (key, role) in &staff_roles {
             // This sort of copying is rather cheap
             staff_roles_cache.insert(role.id.parse::<u64>().unwrap(), key.clone());
+        }
+
+        // This is needed to create a bi-directional cache allowing the mapping of role ids to keys as well as keys to role ids
+        for (key, role) in &normal_roles {
+            // This sort of copying is rather cheap
+            normal_roles_cache.insert(role.id.parse::<u64>().unwrap(), key.clone());
         }
 
         let mut discord_file = File::open(data_dir.to_owned() + "discord.json").expect("No discord.json file found");
@@ -148,7 +184,10 @@ impl Database {
                 fetcher: fetch_bot_1_cli
             },
             staff_roles,
+            pool,
             staff_roles_cache,
+            normal_roles,
+            normal_roles_cache,
             discord
         }
     }
@@ -173,6 +212,29 @@ impl Database {
         }  
 
         perms
+    }
+
+    pub async fn get_normal_roles(&self, id: u64) -> &NormalRole {
+        let mut flags = self.normal_roles.get("user").unwrap();
+
+        if let Some(member) = self.clis.main.cache.member(self.discord.servers.main, UserId(id)) {
+            /* 
+             * Iterate over every role the member has and check if its in normal_role_cache or not
+             * This is also more optimized than looping over all of normal_roles as we only loop
+             * over all roles once
+            */
+            for role in member.roles {
+                if let Some(possible_flag) = self.normal_roles_cache.get(&role.0) {
+                    let possible = self.normal_roles.get(possible_flag).unwrap();
+                    
+                    if possible.flag > flags.flag {
+                        flags = possible;
+                    }
+                }
+            }
+        }  
+
+        flags
     }
 
     pub async fn getch(&self, id: u64) -> Option<IUser> {
