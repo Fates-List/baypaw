@@ -12,7 +12,7 @@ use log::{debug, error, info};
 use std::fs::File;
 use std::io::Read;
 use tokio::task;
-use serenity::model::prelude::{UserId, Ready, GuildId};
+use serenity::model::prelude::{UserId, Ready, GuildId, Member};
 use serenity::async_trait;
 use serenity::builder::CreateInvite;
 use serenity::json as sjson;
@@ -77,13 +77,46 @@ pub struct IUser {
     pub status: Status,
 }
 
-struct MainHandler;
+struct MainHandler {
+    pool: sqlx::PgPool
+}
 
 #[async_trait]
 impl EventHandler for MainHandler {
     async fn ready(&self, _ctx: Context, ready: Ready) {
         debug!("{} is connected!", ready.user.name);
     }
+
+    async fn guild_member_update(&self, _ctx: Context, _old: Option<Member>, _new: Member) {
+        let old_roles = _old.unwrap().roles;
+        let new_roles = _new.roles;
+
+        for role in &new_roles {
+            let path = match env::var_os("HOME") {
+                None => { panic!("$HOME not set"); }
+                Some(path) => PathBuf::from(path),
+            };
+            let data_dir = path.into_os_string().into_string().unwrap() + "/FatesList/config/data/";
+
+            let mut file = File::open(data_dir.to_owned() + "roles.json").unwrap();
+            let mut json_str = String::new();            
+            file.read_to_string(&mut json_str).unwrap();
+            
+            let roles: Vec<NormalRole> = serde_json::from_str(&json_str).unwrap();
+            let mut found = false;
+
+            for r in roles {
+                if r.id == role.to_string() {
+                    found = true;
+                    info!("{} has role {}", _new.user.name, r.fname);
+                    break;
+                }
+            }
+        }
+
+        debug!("{:?}", old_roles);
+        debug!("{:?}", new_roles);
+    } 
 }
 
 impl Database {
@@ -151,7 +184,9 @@ impl Database {
         
         // Main client
         let mut main_cli = Client::builder(&tokens.token_main.clone(), GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES | GatewayIntents::GUILD_MEMBERS | GatewayIntents::GUILD_PRESENCES)
-        .event_handler(MainHandler)
+        .event_handler(MainHandler {
+            pool: pool.clone()
+        })
         .await
         .unwrap();  
         
