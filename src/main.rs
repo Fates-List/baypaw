@@ -1,15 +1,15 @@
-// A *very* primitive and possibly insecure IPC implementation 
+// A *very* primitive and possibly insecure IPC implementation
 // that will also hold the admin bot (in serenity) soon
 //
-// This should never be run without a firewall blocking all remote 
+// This should never be run without a firewall blocking all remote
 // requests to port 1234!
-use actix_web::{web, get, post, App, HttpRequest, HttpServer, HttpResponse};
-use serde::{Deserialize, Serialize};
+use actix_web::{get, post, web, App, HttpRequest, HttpResponse, HttpServer};
 use log::{debug, error};
+use serde::{Deserialize, Serialize};
 mod database;
-use serenity::model::id::GuildId;
-use serde_json::json;
 use bristlefrost::models::User;
+use serde_json::json;
+use serenity::model::id::GuildId;
 
 #[get("/perms/{id}")]
 async fn user_perms(req: HttpRequest, id: web::Path<u64>) -> HttpResponse {
@@ -61,11 +61,20 @@ struct Message {
 async fn send_message(req: HttpRequest, msg: web::Json<Message>) -> HttpResponse {
     let data: &IpcAppData = req.app_data::<web::Data<IpcAppData>>().unwrap();
 
-    let res = data.database.clis.main.http.send_message(msg.channel_id, &json!({
-        "content": msg.content,
-        "embeds": vec![msg.embed.clone()],
-        "mention_roles": msg.mention_roles,
-    })).await;
+    let res = data
+        .database
+        .clis
+        .main
+        .http
+        .send_message(
+            msg.channel_id,
+            &json!({
+                "content": msg.content,
+                "embeds": vec![msg.embed.clone()],
+                "mention_roles": msg.mention_roles,
+            }),
+        )
+        .await;
 
     if res.is_err() {
         error!("Error sending message: {:?}", res.err());
@@ -75,7 +84,7 @@ async fn send_message(req: HttpRequest, msg: web::Json<Message>) -> HttpResponse
     HttpResponse::Ok().finish()
 }
 
-/// Important: This API does not handle server privacy. This should be 
+/// Important: This API does not handle server privacy. This should be
 /// done server-side
 
 #[derive(Serialize, Deserialize)]
@@ -99,13 +108,10 @@ async fn guild_invite(req: HttpRequest, info: web::Query<GuildInviteQuery>) -> H
         let invite_code = data.database.guild_invite(info.cid, info.uid).await;
 
         if let Some(url) = invite_code {
-            return HttpResponse::Ok().json(GuildInviteData {
-                url,
-                cid: info.cid,
-            });
+            return HttpResponse::Ok().json(GuildInviteData { url, cid: info.cid });
         }
     }
-    
+
     // First get channels from cache
     let chan_cache = GuildId(info.gid).to_guild_cached(data.database.clis.servers.cache.clone());
 
@@ -122,7 +128,9 @@ async fn guild_invite(req: HttpRequest, info: web::Query<GuildInviteQuery>) -> H
             }
         }
     } else {
-        let res = GuildId(info.gid).channels(data.database.clis.servers.http.clone()).await;
+        let res = GuildId(info.gid)
+            .channels(data.database.clis.servers.http.clone())
+            .await;
         if let Err(err) = res {
             error!("Error getting channels: {:?}", err);
             return HttpResponse::BadRequest().finish();
@@ -143,7 +151,6 @@ async fn guild_invite(req: HttpRequest, info: web::Query<GuildInviteQuery>) -> H
     HttpResponse::NotFound().finish()
 }
 
-
 struct IpcAppData {
     database: database::Database,
 }
@@ -155,9 +162,7 @@ async fn main() -> std::io::Result<()> {
     env_logger::init();
 
     let database = database::Database::new().await;
-    let app_data = web::Data::new(IpcAppData {
-        database,
-    });
+    let app_data = web::Data::new(IpcAppData { database });
 
     HttpServer::new(move || {
         App::new()
