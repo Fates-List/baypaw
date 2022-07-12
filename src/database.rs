@@ -133,14 +133,14 @@ impl EventHandler for MainHandler {
                             .await;
                     }
                 } else if let Ok(flags) = res {
+                    added_flags.push(role.flag);
+
                     if flags.flags.contains(&role.flag) {
                         debug!("User already has {}", name);
                         continue;
                     }
 
                     debug!("User does not have {}. Adding now", name);
-                    
-                    added_flags.push(role.flag);
 
                     let res = sqlx::query!(
                         "UPDATE users SET flags = array_remove(flags, $1) WHERE user_id = $2",
