@@ -97,7 +97,14 @@ impl EventHandler for MainHandler {
     }
 
     async fn guild_member_update(&self, ctx: Context, _: Option<Member>, new: Member) {
+        let mut added_flags = Vec::new();
+
         for (name, role) in &self.normal_roles {
+            if added_flags.contains(&role.flag) {
+                // Aready dealt with this flag
+                continue;
+            }
+
             debug!("Checking if user has {}", name);
 
             if new.roles.contains(&RoleId(role.id)) {
@@ -131,7 +138,10 @@ impl EventHandler for MainHandler {
                         continue;
                     }
 
-                    debug!("User does not have {}", name);
+                    debug!("User does not have {}. Adding now", name);
+                    
+                    added_flags.push(role.flag);
+
                     let res = sqlx::query!(
                         "UPDATE users SET flags = array_remove(flags, $1) WHERE user_id = $2",
                         role.flag,
@@ -237,7 +247,7 @@ impl Database {
 
         let pool = PgPoolOptions::new()
             .max_connections(MAX_CONNECTIONS)
-            .connect(&std::env::var("DATABASE_URL").expect("missing DATABASE_URL"))
+            .connect("postgres://localhost/fateslist")
             .await
             .expect("Could not initialize connection");
 
